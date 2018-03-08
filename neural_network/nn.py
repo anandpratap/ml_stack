@@ -86,7 +86,20 @@ class NeuralNetwork(object):
             end = start + self.biases[i-1].size
             self.biases[i-1] = np.reshape(gamma[start:end], self.biases[i-1].shape)
             start = end
+    def get_array(self):
+        gamma = np.zeros(self.n)
+        start = 0
+        for i in range(1, self.nlayer):
+            end = start + self.weights[i-1].size
+            gamma[start:end] = np.reshape(self.weights[i-1], (self.weights[i-1].size,))
+            start = end
 
+        for i in range(1, self.nlayer):
+            end = start + self.biases[i-1].size
+            gamma[start:end] = np.reshape(self.biases[i-1], (self.biases[i-1].size,))
+            start = end
+        return gamma
+            
     def dydgamma(self, x, gamma):
         """
         Calculate derivative of the neural network output with respect to the
