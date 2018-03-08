@@ -1,51 +1,21 @@
 import numpy as np
 import adolc as ad
 import pickle
-def calc_jacobian(*args, **kwargs):
-    try:
-        tag = kwargs["tag"]
-    except:
-        tag = 0
-
-    try:
-        sparse = kwargs["sparse"]
-    except:
-        sparse = True
-
-    if sparse:
-        try:
-            shape = kwargs["shape"]
-        except:
-            raise ValueError("'shape' should be passed to calculate sparse jacobian!")
-
-        
-        options = np.array([0,0,0,0],dtype=int)
-        result = ad.colpack.sparse_jac_no_repeat(tag, *args, options=options)
-        nnz = result[0]
-        ridx = result[1]
-        cidx = result[2]
-        values = result[3]
-        assert nnz > 0
-        jac = sp.csr_matrix((values, (ridx, cidx)), shape=shape)
-        jac = jac.toarray()
-    else:
-        jac = ad.jacobian(tag, *args)
-    return jac
-
-def sigmoid(x):
-    #return x*x
-    return 1.0/(1.0 + np.exp(-x))
-
-def dsigmoid(x):
-    return sigmoid(x)*(1.0 - sigmoid(x))
-
+from utils import calc_jacobian
+from activation import activation_functions
 
 class NeuralNetwork(object):
     """
-    
+    A simple feed forward neural network.
+    Input:
+    sizes: list containing number of neurons in each layer.
+            Example: [1, 10, 1] contains input layer with 1 inputs,
+            a hidder layer with 10 neurons, and a output layer with 1 output.
+    activation_function: default = tanh
+                         options: sigmoid, tanh, atan, identity
     
     """
-    def __init__(self, sizes = [2, 10, 1]):
+    def __init__(self, sizes = [2, 10, 1], activation_function="tanh"):
         self.nlayer = len(sizes)
         self.sizes = sizes
         
@@ -66,12 +36,31 @@ class NeuralNetwork(object):
             self.weights.append(weights)
             self.biases.append(bias)
         self.n = self.nw + self.nb
+        self.activation_function = activation_function
 
-    def veval(self, x):
+    def get_nhyperparameters(self):
+        return self.n
+
+    def get_nweights(self):
+        return self.nw
+
+    def get_nbiases(self):
+        return self.nb
+        
+    def veval(self, *args):
+        """Vectorize version of the function eval to be
+           used with numpy array as inputs
+        """
         np_veval = np.vectorize(self.eval)
-        return np_veval(x)
+        return np_veval(*args)
+
+    def activation(self, x):
+        return activation_functions[self.activation_function](x)
     
     def eval(self, *args):
+        """Evaluate the neural network.
+        Example: nn.eval(x1, x2, x3)
+        """
         x = np.array(args).T
         assert x.size == self.sizes[0]
         for i in range(1, self.nlayer):
@@ -79,46 +68,54 @@ class NeuralNetwork(object):
             if i == self.nlayer-1:
                 x = y
             else:
-                x = sigmoid(y)
+                x = self.activation(y)
         return x[0]
     
-    def set_from_vector(self, beta):
-        assert beta.size == self.nw + self.nb
+    def set_from_array(self, gamma):
+        """Set weights and biases from a numpy array of size self.n.
+           All weights are assigned first followed by biases.
+        """
+        assert gamma.size == self.get_nhyperparameters()
         start = 0
         for i in range(1, self.nlayer):
             end = start + self.weights[i-1].size
-            self.weights[i-1] = np.reshape(beta[start:end], self.weights[i-1].shape)
+            self.weights[i-1] = np.reshape(gamma[start:end], self.weights[i-1].shape)
             start = end
 
         for i in range(1, self.nlayer):
             end = start + self.biases[i-1].size
-            self.biases[i-1] = np.reshape(beta[start:end], self.biases[i-1].shape)
+            self.biases[i-1] = np.reshape(gamma[start:end], self.biases[i-1].shape)
             start = end
 
-    def dydbeta(self, x, beta):
-        beta_c = beta.copy()
-        beta = ad.adouble(beta)
+    def dydgamma(self, x, gamma):
+        """
+        Calculate derivative of the neural network output with respect to the
+        hyperparameters gamma.
+        """
+        gamma_c = gamma.copy()
+        gamma = ad.adouble(gamma)
         tag = 11
         ad.trace_on(tag)
-        ad.independent(beta)
-        self.set_from_vector(beta)
+        ad.independent(gamma)
+        self.set_from_array(gamma)
         y = self.eval(x)
         ad.dependent(y)
         ad.trace_off()
-        beta = beta_c
-        self.set_from_vector(beta_c)
-        dJdbeta = calc_jacobian(beta, tag=tag, sparse=False)
-        #print dJdbeta.shape
-        return dJdbeta.reshape(beta_c.shape)
+        gamma = gamma_c
+        self.set_from_array(gamma_c)
+        dJdgamma = calc_jacobian(gamma, tag=tag, sparse=False)
+        return dJdgamma.reshape(gamma_c.shape)
 
 
     def save(self, filename="network.nn"):
+        """Save neural network to a pickle file."""
         with open(filename, 'wb') as f:
             print self.__dict__
             pickle.dump(self.__dict__, f)
 
 
     def load(self, filename="network.nn"):
+        """Load neural network from a pickle file."""
         with open(filename, 'rb') as f:
             tmp_dict = pickle.load(f)
         self.__dict__.update(tmp_dict) 
@@ -143,24 +140,24 @@ if __name__ == "__main__":
     nn = NeuralNetwork(sizes=[1, 1])
     y = nn.eval(np.array([1.0]))
     print y
-    beta = np.random.randn(nn.n)*0.02
+    gamma = np.random.randn(nn.n)*0.02
 
     for j in range(10000):
-        nn.set_from_vector(beta)
-        dJdbeta = np.zeros_like(beta)
+        nn.set_from_array(gamma)
+        dJdgamma = np.zeros_like(gamma)
         J = 0.0
         for i in range(len(xd)):
             xin = xd[i]
             yeval = nn.eval(xin)
             #print yeval
             J += (yeval - yd[i])**2
-            dydbeta = nn.dydbeta(xin, beta)
-            dJdbeta += 2.0*(yeval - yd[i])*dydbeta
+            dydgamma = nn.dydgamma(xin, gamma)
+            dJdgamma += 2.0*(yeval - yd[i])*dydgamma
             
-        beta = beta - dJdbeta/np.abs(dJdbeta).max()*0.01
+        gamma = gamma - dJdgamma/np.abs(dJdgamma).max()*0.01
         if j%100 == 0:
             print j, J
-        #print beta
+        #print gamma
 
     yeval = []
     for i in range(len(xd)):
