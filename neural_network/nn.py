@@ -123,7 +123,6 @@ class NeuralNetwork(object):
     def save(self, filename="network.nn"):
         """Save neural network to a pickle file."""
         with open(filename, 'wb') as f:
-            print self.__dict__
             pickle.dump(self.__dict__, f)
 
 
